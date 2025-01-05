@@ -29,51 +29,13 @@ branch_exists() {
     return $?
 }
 
-# Function to create a clean branch with specific folders
-create_clean_branch() {
-    local branch_name=$1
-    local folders=("${@:2}")
-
-    log "Creating clean branch: $branch_name"
-
-    # Create new orphan branch (no history)
-    git checkout --orphan "temp-$branch_name"
-
-    # Remove everything from staging
-    git rm -rf --cached . || true
-
-    # Clean the working directory
-    git clean -fdx
-
-    # Create required folders if they don't exist
-    for folder in "${folders[@]}"; do
-        mkdir -p "$folder"
-        touch "$folder/.gitkeep"
-        # Create a README.md in each folder
-        echo "# $folder" > "$folder/README.md"
-        echo "This folder is part of the $branch_name branch." >> "$folder/README.md"
-    done
-
-    # Add and commit the folders
-    git add .
-    git config --global user.email "temp@example.com"
-    git config --global user.name "Temporary User"
-
-    if ! git commit -m "Initial commit for $branch_name with required folders"; then
-        error "Failed to create commit for $branch_name"
-        exit 1
+# Function to safely delete branch
+delete_branch() {
+    local branch=$1
+    if branch_exists "$branch"; then
+        log "Deleting branch: $branch"
+        git branch -D "$branch"
     fi
-
-    # If the target branch exists, rename it with -old suffix
-    if branch_exists "$branch_name"; then
-        warn "Branch $branch_name already exists, renaming to $branch_name-old"
-        git branch -m "$branch_name" "$branch_name-old"
-    fi
-
-    # Rename temp branch to target branch
-    git branch -m "temp-$branch_name" "$branch_name"
-
-    log "Branch $branch_name created successfully"
 }
 
 # Initialize git repository if needed
@@ -81,6 +43,10 @@ if ! git rev-parse --git-dir > /dev/null 2>&1; then
     log "Initializing git repository..."
     git init
 fi
+
+# Save current branch
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+log "Current branch: $CURRENT_BRANCH"
 
 # Create initial commit if needed
 if ! git rev-parse --quiet --verify HEAD > /dev/null 2>&1; then
@@ -94,40 +60,50 @@ if ! git rev-parse --quiet --verify HEAD > /dev/null 2>&1; then
     git commit -m "Initial commit"
 fi
 
-# Create develop branch if it doesn't exist
+# Ensure we're on main branch
+if ! branch_exists "main"; then
+    log "Creating main branch..."
+    git checkout -b main
+fi
+
+# Create develop branch from main if it doesn't exist
 if ! branch_exists "develop"; then
-    log "Creating develop branch..."
-    git checkout -b develop main || git checkout -b develop
+    log "Creating develop branch from main..."
+    git checkout main
+    git checkout -b develop
     echo "# Travel Experience Network - Development Branch" > README.md
     echo "Development branch for the digital travel planning platform." >> README.md
     git add README.md
-    git commit -m "Initial develop branch commit" || true
+    git commit -m "Initial develop branch setup"
 fi
 
-# Save current branch
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-log "Current branch: $CURRENT_BRANCH"
+# Remove old organizational branches
+log "Cleaning up old organizational branches..."
+delete_branch "features"
+delete_branch "features-old"
+delete_branch "bugfixes"
+delete_branch "bugfixes-old"
+delete_branch "environment"
+delete_branch "environment-old"
 
-# Create bugfixes branch with frontend and backend folders
-log "Setting up bugfixes branch..."
-create_clean_branch "bugfixes" "bugfixes/frontend" "bugfixes/backend"
+# Create example feature branch structure
+log "Creating example feature branch..."
+git checkout develop
+git checkout -b feat/validation-messages
+echo "# Validation Messages Feature" > validation-messages.md
+echo "Implementation of enhanced validation messages across environments." >> validation-messages.md
+git add validation-messages.md
+git commit -m "feat: add validation messages feature template"
 
-# Create features branch (empty for now)
-log "Setting up features branch..."
-create_clean_branch "features" "features"
+# Return to develop branch
+log "Returning to develop branch..."
+git checkout develop
 
-# Handle environment branch
-log "Setting up environment branch..."
-if branch_exists "environment"; then
-    log "Renaming current environment branch to environment-old"
-    git checkout environment
-    git branch -m environment-old
-fi
+# Remove temporary feature branch
+delete_branch "feat/validation-messages"
 
-create_clean_branch "environment" "environment"
+log "Git branch restructuring completed successfully"
 
-# Return to original branch
-log "Returning to $CURRENT_BRANCH branch..."
-git checkout "$CURRENT_BRANCH"
-
-log "Branch reorganization completed successfully"
+# Print current structure
+log "Current branch structure:"
+git branch -a
